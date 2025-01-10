@@ -214,11 +214,14 @@ class AudioProcessor:
             # Convert float32 to int16 for wave file
             audio_data = (audio_data * 32767).astype(np.int16)
             
+            # Play stop sound
+            AudioNotifier.play_sound('stop')
+            
+            # Show thinking icon before starting transcription
+            self.icon_state = "💭"
+            
             # Save and transcribe
             self._save_and_transcribe(audio_data)
-            
-            AudioNotifier.play_sound('stop')
-            self.icon_state = "🎤"
             
         except Exception as e:
             logger.error(f"Error stopping recording: {e}")
@@ -261,15 +264,25 @@ class AudioProcessor:
                 # Copy to clipboard
                 pyperclip.copy(transcription)
                 logger.info("Transcription copied to clipboard")
+                # Show success icon briefly
+                self.icon_state = "✅"
+                time.sleep(1)
                 AudioNotifier.play_sound('success')
             else:
                 logger.warning("No transcription generated")
+                self.icon_state = "❌"
                 AudioNotifier.play_sound('error')
+                time.sleep(1)
                 
         except Exception as e:
             logger.error(f"Error in transcription: {e}")
+            self.icon_state = "❌"
             AudioNotifier.play_sound('error')
+            time.sleep(1)
         finally:
+            # Reset icon to default
+            self.icon_state = "🎤"
+            
             # Clean up the audio file with retries
             max_retries = 3
             retry_delay = 0.5  # seconds
@@ -326,7 +339,6 @@ class AudioProcessor:
         """
         try:
             logger.info("Starting transcription")
-            self.icon_state = "💭"  # Thinking emoji
             
             # Get model for transcription
             model = self.model_manager.get_model()
@@ -373,8 +385,6 @@ class AudioProcessor:
         except Exception as e:
             logger.error(f"Error during transcription: {e}")
             return None
-        finally:
-            self.icon_state = "🎤"  # Reset icon
 
     def cleanup(self):
         """Clean up resources."""
