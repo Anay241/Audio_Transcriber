@@ -26,10 +26,10 @@ ssl_context = ssl.create_default_context(cafile=certifi.where())
 ssl_context.verify_mode = ssl.CERT_REQUIRED
 
 # Audio Configuration
-CHUNK_SIZE = 4096  # Larger chunk size for better quality
-FORMAT = pyaudio.paFloat32  # 32-bit float for better quality
-CHANNELS = 1  # Mono recording
-RATE = 44100  # CD-quality sampling rate
+CHUNK_SIZE = 8192  
+FORMAT = pyaudio.paInt16  
+CHANNELS = 1  
+RATE = 32000  
 
 class AudioNotifier:
     """Handle system sound notifications."""
@@ -177,7 +177,8 @@ class AudioProcessor:
                 rate=self.rate,
                 input=True,
                 frames_per_buffer=self.chunk,
-                stream_callback=self._audio_callback
+                stream_callback=self._audio_callback,
+                input_device_index=None  # Use default input device
             )
             self.frames = []
             self.is_recording = True
@@ -193,7 +194,7 @@ class AudioProcessor:
     def _audio_callback(self, in_data, frame_count, time_info, status):
         """Handle incoming audio data."""
         if self.is_recording:
-            self.frames.append(np.frombuffer(in_data, dtype=np.float32))
+            self.frames.append(np.frombuffer(in_data, dtype=np.int16))
         return (in_data, pyaudio.paContinue)
 
     def stop_recording(self):
@@ -210,9 +211,6 @@ class AudioProcessor:
 
             # Convert audio data to the correct format for saving
             audio_data = np.concatenate(self.frames, axis=0)
-            
-            # Convert float32 to int16 for wave file
-            audio_data = (audio_data * 32767).astype(np.int16)
             
             # Play stop sound
             AudioNotifier.play_sound('stop')
