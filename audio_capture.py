@@ -1,14 +1,12 @@
-from typing import Optional, Set, List
+from typing import Optional, List
 import os
 import time
 import wave
 from datetime import datetime
 from threading import Thread
-import sys
 import logging
 import ssl
 import certifi
-import gc
 import pyaudio
 import numpy as np
 from faster_whisper import WhisperModel
@@ -35,10 +33,10 @@ class AudioNotifier:
     """Handle system sound notifications."""
     
     SOUNDS = {
-        'start': '/System/Library/Sounds/Pop.aiff',      # Recording start
-        'stop': '/System/Library/Sounds/Bottle.aiff',    # Recording stop
-        'success': '/System/Library/Sounds/Glass.aiff',  # Transcription complete
-        'error': '/System/Library/Sounds/Basso.aiff'     # Error occurred
+        'start': '/System/Library/Sounds/Pop.aiff',
+        'stop': '/System/Library/Sounds/Bottle.aiff',
+        'success': '/System/Library/Sounds/Glass.aiff',
+        'error': '/System/Library/Sounds/Basso.aiff'
     }
     
     @staticmethod
@@ -128,11 +126,7 @@ class AudioTranscriberApp(rumps.App):
 
 class AudioProcessor:
     def __init__(self, app):
-        """Initialize the audio processing system."""
-        logger.debug("Initializing AudioProcessor")
         self.app = app
-        
-        # Initialize PyAudio
         self.audio = pyaudio.PyAudio()
         
         # Audio settings
@@ -141,16 +135,12 @@ class AudioProcessor:
         self.rate = RATE
         self.chunk = CHUNK_SIZE
         
-        # Recording state
         self.is_recording = False
         self.ready_to_record = True
         self.frames = []
         self.stream = None
-        
-        # Model management
         self.model_manager = ModelManager()
         
-        # Setup keyboard listener
         self.keys_pressed = set()
         self.listener = keyboard.Listener(
             on_press=self.on_press,
@@ -160,16 +150,13 @@ class AudioProcessor:
 
     @property
     def icon_state(self):
-        """Get current icon state."""
         return self.app._current_icon
 
     @icon_state.setter
     def icon_state(self, value):
-        """Set icon state and update menu bar."""
         self.app.set_icon(value)
 
     def start_recording(self):
-        """Start audio recording with improved quality settings."""
         try:
             self.stream = self.audio.open(
                 format=self.format,
@@ -178,7 +165,7 @@ class AudioProcessor:
                 input=True,
                 frames_per_buffer=self.chunk,
                 stream_callback=self._audio_callback,
-                input_device_index=None  # Use default input device
+                input_device_index=None
             )
             self.frames = []
             self.is_recording = True
@@ -192,13 +179,11 @@ class AudioProcessor:
             AudioNotifier.play_sound('error')
 
     def _audio_callback(self, in_data, frame_count, time_info, status):
-        """Handle incoming audio data."""
         if self.is_recording:
             self.frames.append(np.frombuffer(in_data, dtype=np.int16))
         return (in_data, pyaudio.paContinue)
 
     def stop_recording(self):
-        """Stop recording and process the audio."""
         if not self.is_recording:
             return
 
@@ -209,16 +194,9 @@ class AudioProcessor:
                 self.stream.close()
                 self.stream = None
 
-            # Convert audio data to the correct format for saving
             audio_data = np.concatenate(self.frames, axis=0)
-            
-            # Play stop sound
             AudioNotifier.play_sound('stop')
-            
-            # Show thinking icon before starting transcription
             self.icon_state = "💭"
-            
-            # Save and transcribe
             self._save_and_transcribe(audio_data)
             
         except Exception as e:
@@ -229,20 +207,16 @@ class AudioProcessor:
             self.frames = []
 
     def _save_and_transcribe(self, audio_data):
-        """Save the recording and initiate transcription."""
         try:
-            # Generate timestamp for the filename
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"recording_{timestamp}.wav"
             
-            # Save the WAV file
             with wave.open(filename, 'wb') as wf:
                 wf.setnchannels(self.channels)
-                wf.setsampwidth(2)  # 16-bit
+                wf.setsampwidth(2)
                 wf.setframerate(self.rate)
                 wf.writeframes(audio_data.tobytes())
             
-            # Start transcription in a separate thread
             Thread(target=self._transcribe_and_cleanup, 
                   args=(audio_data, filename)).start()
             
@@ -253,16 +227,12 @@ class AudioProcessor:
             raise
 
     def _transcribe_and_cleanup(self, audio_data: np.ndarray, filename: str) -> None:
-        """Transcribe audio and handle the result."""
         try:
-            # Transcribe the audio
             transcription = self.transcribe_audio(audio_data)
             
             if transcription:
-                # Copy to clipboard
                 pyperclip.copy(transcription)
                 logger.info("Transcription copied to clipboard")
-                # Show success icon briefly
                 self.icon_state = "✅"
                 time.sleep(1)
                 AudioNotifier.play_sound('success')
@@ -278,12 +248,10 @@ class AudioProcessor:
             AudioNotifier.play_sound('error')
             time.sleep(1)
         finally:
-            # Reset icon to default
             self.icon_state = "🎤"
             
-            # Clean up the audio file with retries
             max_retries = 3
-            retry_delay = 0.5  # seconds
+            retry_delay = 0.5
             
             for attempt in range(max_retries):
                 try:
@@ -327,21 +295,13 @@ class AudioProcessor:
 
     def transcribe_audio(self, audio_data: np.ndarray) -> Optional[str]:
         """
-        Transcribe audio using Whisper.
-        
-        Args:
-            audio_data: The audio data to transcribe
-            
-        Returns:
-            Transcription text or None if transcription failed
+        Transcribe audio using Whisper with optimized settings for voice recognition.
+        Uses beam search and VAD filtering for better accuracy.
         """
         try:
             logger.info("Starting transcription")
-            
-            # Get model for transcription
             model = self.model_manager.get_model()
             
-            # Save temporary audio file
             temp_file = "temp_recording.wav"
             with wave.open(temp_file, 'wb') as wf:
                 wf.setnchannels(self.channels)
@@ -349,7 +309,6 @@ class AudioProcessor:
                 wf.setframerate(self.rate)
                 wf.writeframes(audio_data.tobytes())
             
-            # Transcribe using Faster Whisper
             try:
                 segments, _ = model.transcribe(
                     temp_file,
@@ -359,24 +318,19 @@ class AudioProcessor:
                     vad_parameters=dict(min_silence_duration_ms=500)
                 )
                 
-                # Process segments
                 text_segments = []
                 for segment in segments:
-                    # Clean up the segment text
                     segment_text = segment.text.strip()
                     if segment_text:
                         text_segments.append(segment_text)
                 
-                # Join and process the text
                 if text_segments:
-                    text = ' '.join(text_segments)
-                    return text
+                    return ' '.join(text_segments)
                 else:
                     logger.warning("No speech detected in audio")
                     return None
                     
             finally:
-                # Ensure temporary file is always cleaned up
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
                     
@@ -385,14 +339,11 @@ class AudioProcessor:
             return None
 
     def cleanup(self):
-        """Clean up resources."""
         logger.debug("Cleaning up resources")
         
-        # Stop recording if active
         if self.is_recording:
             self.is_recording = False
         
-        # Clean up audio stream
         if self.stream:
             try:
                 self.stream.stop_stream()
@@ -402,7 +353,6 @@ class AudioProcessor:
             finally:
                 self.stream = None
         
-        # Clean up PyAudio
         if self.audio:
             try:
                 self.audio.terminate()
@@ -411,7 +361,6 @@ class AudioProcessor:
             finally:
                 self.audio = None
         
-        # Stop keyboard listener
         if self.listener:
             try:
                 self.listener.stop()
@@ -420,9 +369,7 @@ class AudioProcessor:
             finally:
                 self.listener = None
         
-        # Clear any remaining frames
         self.frames = []
-        
         logger.debug("Cleanup completed")
 
 def main():
